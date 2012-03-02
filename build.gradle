@@ -1,0 +1,142 @@
+import groovy.xml.MarkupBuilder
+apply plugin: 'base'
+apply plugin: 'maven'
+
+group = 'com.github.venkatperi.gradleboostproject'
+String version = '1.48.0'
+String version_ = '1_48_0'
+String fullVersion = version + "-SNAPSHOT"
+String fullVersion_ = version_ + "-SNAPSHOT"
+
+String fileBase = 'boost_1_48_0'
+String filename = 'boost_1_48_0.zip'
+artifactId = "boostlib-stdcall-vc100-mt"
+
+tmpDir = "$buildDir/tmp" 
+srcDir = "$buildDir/src" 
+outDir = project.buildDir.toString() + '/dist'
+cacheDir = './.cache'
+td = file(tmpDir)
+sd = file(srcDir)
+od = file(outDir)
+cd = file(cacheDir)
+
+ configurations {
+    snapshot
+    release
+}
+
+task resources  {
+    outputs.files td, sd, od
+    doLast {
+        td.mkdirs()
+        sd.mkdirs()
+        od.mkdirs()
+        cd.mkdirs()
+    }
+}
+
+task download(dependsOn: 'resources') << {
+    if (!new File(cacheDir + '/' + filename).exists()) {
+        println "Downloading sources..."
+        ant.get(src: 'http://voxel.dl.sourceforge.net/project/boost/boost/'+version+'/'+filename, dest:cacheDir + '/' + filename, verbose:"true")
+    }
+    else
+    {
+        println "Found sources in cache..."
+    }
+}
+
+task extract(dependsOn: 'download') << {
+    println "Extracting sources..."
+    ant.unzip(src:cacheDir+'/'+filename, dest:srcDir)
+}
+
+task bootstrap << {
+   exec {
+        workingDir = srcDir + '/' + fileBase 
+        println 'Working dir: ' + workingDir.toString()
+		executable = 'cmd'
+	   	args = ['/c', 'bootstrap']
+	}
+}
+
+buildArgs = [ 'cxxflags=/Gz', 
+    'define=BOOST_USE_WINDOWS_H', 
+    'define=BOOST_MEM_FN_ENABLE_STDCALL', 
+    '--without-locale', 
+    '--without-python', 
+    '--without-test', 
+    '--without-mpi', 
+    '--prefix=' + outDir , 
+    'install']
+
+task build << {
+   exec {
+        workingDir = srcDir + '/' + fileBase 
+		executable = srcDir + '/' + fileBase + '/b2.exe'
+        args = buildArgs
+	}
+}
+
+task manifest  {
+    def writer = new StringWriter()
+    def xml = new MarkupBuilder(writer)
+    xml.Manifest(version:"1.0")
+    {
+        About()
+        {
+            GroupId("org.boost.lib")
+            ArtifactId(artifactId)
+            Version(version)
+            Name("boostlib-stdcall")
+            Description("Boost C++ Libraries")
+            BuildArgs(buildArgs.sum{x->x + ' '})
+        }
+
+        Compile()
+        {
+            Include("include")
+            Lib("lib")
+        }
+
+        Runtime()
+        {
+            Dll("lib")
+        }
+    }
+    doLast {
+        println "Writing manifest"
+        new File(outDir + "/manifest.xml").withWriter { 
+            out -> out.write( writer.toString() )
+        }
+    }
+}
+
+task pkg(type: Zip)  {
+    def name = project.buildDir.toString() + '/' + 
+            artifactId + '-' + fullVersion_ + ".zip" 
+
+    destFile = file(name)
+
+    doLast {
+        println "Creating artifact: " + name
+        ant.zip(destfile: name, basedir: outDir)
+    }
+}
+
+artifacts {
+    archives file: pkg.destFile
+}
+
+uploadArchives {
+    repositories {
+        mavenDeployer {
+            configuration = configurations.snapshot
+            repository(url: "http://localhost:8081/nexus/content/repositories/releases")
+            snapshotRepository(url: "http://localhost:8081/nexus/content/repositories/snapshots")
+            pom.version = fullVersion
+            pom.artifactId = artifactId
+        }
+    }
+}
