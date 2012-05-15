@@ -1,142 +1,187 @@
-import groovy.xml.MarkupBuilder
-apply plugin: 'base'
+//
+//  Copyright (c) 2012 RemoteReality Corporation. All Rights Reserved. 
+//  
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
+//  
+//  http://www.apache.org/licenses/LICENSE-2.0
+//  
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+//
+//  Author(s): Venkat Peri. RemoteReality Corporation.
+//
+
+
+
 apply plugin: 'maven'
 
-group = 'com.github.venkatperi.gradleboostproject'
-String version = '1.48.0'
-String version_ = '1_48_0'
-String fullVersion = version + "-SNAPSHOT"
-String fullVersion_ = version_ + "-SNAPSHOT"
+version_ = boostVer.replace('.', '_')
 
-String fileBase = 'boost_1_48_0'
-String filename = 'boost_1_48_0.zip'
-artifactId = "boostlib-stdcall-vc100-mt"
+fileBase = "boost_$version_"
+filename = fileBase + '.zip'
 
-tmpDir = "$buildDir/tmp" 
-srcDir = "$buildDir/src" 
-outDir = project.buildDir.toString() + '/dist'
+tmpDir = "$buildDir/tmp"
+srcDir = "$buildDir/src"
+outDir = "$tmpDir/car"
 cacheDir = './.cache'
-td = file(tmpDir)
-sd = file(srcDir)
-od = file(outDir)
-cd = file(cacheDir)
 
- configurations {
-    snapshot
+configurations {
+    compile
     release
 }
 
-task resources  {
-    outputs.files td, sd, od
-    doLast {
-        td.mkdirs()
-        sd.mkdirs()
-        od.mkdirs()
-        cd.mkdirs()
+buildscript {
+    dependencies {
+        classpath group: 'com.github.venkatperi.gradle.plugins', name: 'CarPlugin', version: '1.0-SNAPSHOT'
+        classpath group: 'com.github.venkatperi.gradle.plugins', name: 'MSBuildPlugin', version: '1.0-SNAPSHOT'
+    }
+
+    repositories {
+    ivy {
+        url local_ivy
+    }
+        mavenRepo name: 'snapshots', 
+                url: project[repo + '_repo_snapshots_url']
+        mavenRepo name: 'releases', 
+                url: project[repo + '_repo_releases_url']
+        mavenRepo name: 'public', 
+            url: project[repo + '_repo_public_url']
+    }
+
+}
+
+apply plugin: 'car'
+apply plugin: 'msbuild'
+
+task resources << {
+    def dirs = [tmpDir, srcDir, outDir, cacheDir]
+    dirs.each { mkdir it }
+}
+
+task bootstrap << {
+    exec {
+        workingDir = srcDir + '/' + fileBase
+        println 'Working dir: ' + workingDir.toString()
+        executable = 'cmd'
+        args = ['/c', 'bootstrap']
     }
 }
 
 task download(dependsOn: 'resources') << {
     if (!new File(cacheDir + '/' + filename).exists()) {
         println "Downloading sources..."
-        ant.get(src: 'http://voxel.dl.sourceforge.net/project/boost/boost/'+version+'/'+filename, dest:cacheDir + '/' + filename, verbose:"true")
+        ant.get(src: 'http://voxel.dl.sourceforge.net/project/boost/boost/' + boostVer + '/' + filename, dest: cacheDir + '/' + filename, verbose: "true")
     }
-    else
-    {
+    else {
         println "Found sources in cache..."
     }
 }
 
 task extract(dependsOn: 'download') << {
     println "Extracting sources..."
-    ant.unzip(src:cacheDir+'/'+filename, dest:srcDir)
-}
-
-task bootstrap << {
-   exec {
-        workingDir = srcDir + '/' + fileBase 
-        println 'Working dir: ' + workingDir.toString()
-		executable = 'cmd'
-	   	args = ['/c', 'bootstrap']
-	}
-}
-
-buildArgs = [ 'cxxflags=/Gz', 
-    'define=BOOST_USE_WINDOWS_H', 
-    'define=BOOST_MEM_FN_ENABLE_STDCALL', 
-    '--without-locale', 
-    '--without-python', 
-    '--without-test', 
-    '--without-mpi', 
-    '--prefix=' + outDir , 
-    'install']
-
-task build << {
-   exec {
-        workingDir = srcDir + '/' + fileBase 
-		executable = srcDir + '/' + fileBase + '/b2.exe'
-        args = buildArgs
-	}
-}
-
-task manifest  {
-    def writer = new StringWriter()
-    def xml = new MarkupBuilder(writer)
-    xml.Manifest(version:"1.0")
-    {
-        About()
-        {
-            GroupId("org.boost.lib")
-            ArtifactId(artifactId)
-            Version(version)
-            Name("boostlib-stdcall")
-            Description("Boost C++ Libraries")
-            BuildArgs(buildArgs.sum{x->x + ' '})
-        }
-
-        Compile()
-        {
-            Include("include")
-            Lib("lib")
-        }
-
-        Runtime()
-        {
-            Dll("lib")
-        }
-    }
-    doLast {
-        println "Writing manifest"
-        new File(outDir + "/manifest.xml").withWriter { 
-            out -> out.write( writer.toString() )
-        }
+    copy {
+        from zipTree(cacheDir + '/' + filename)
+        into srcDir
+        eachFile { println it.getPath() }
     }
 }
 
-task pkg(type: Zip)  {
-    def name = project.buildDir.toString() + '/' + 
-            artifactId + '-' + fullVersion_ + ".zip" 
+libraries {
+    configuration = project.configurations.compile
+}
 
-    destFile = file(name)
+buildArgs = [
+        'define=BOOST_USE_WINDOWS_H',
+        '--without-locale',
+        '--without-python',
+        '--without-test',
+        '--without-mpi',
+        '--prefix=' + outDir,
+        'install']
 
-    doLast {
-        println "Creating artifact: " + name
-        ant.zip(destfile: name, basedir: outDir)
+task vcxproj(overwrite: true) <<{
+}
+
+task build(overwrite: true) <<{
+}
+
+task stage(overwrite: true) <<{
+}
+
+
+task compile(overwrite: true) << {
+	def variant = project.buildConfig == 'dbg' ? 'debug' : 'release'
+	def link = project.type == 'lib' ? 'static' : 'dynamic'
+	def arch = project.arch == 'x64' ? '64' : '32'
+	def crt  = (project.crt == 'md' || project.crt == 'mdd') ? 'shared' : 'static'
+
+	def a = buildArgs +  ["variant=$variant", "link=$link", 
+                "address-model=$arch", "runtime-link=$crt"]
+
+    if (project.call=='sc') { //stdcall
+        a += ['cxxflags=/Gz', 'define=BOOST_MEM_FN_ENABLE_STDCALL']
+    }
+		
+	exec {
+        workingDir = srcDir + '/' + fileBase
+        executable = srcDir + '/' + fileBase + '/b2.exe'
+        args = a
     }
 }
 
-artifacts {
-    archives file: pkg.destFile
+car {
+    manifest {
+        attributes(
+                "dirs": ['include/boost-1_48'],
+                'compile'
+        )
+
+        attributes(
+                "dirs": ['lib'],
+                "flags": [],
+                'libs': [],
+                'link'
+        )
+
+        attributes(
+                'files': [],
+                'runtime'
+        )
+    }
 }
+
 
 uploadArchives {
     repositories {
-        mavenDeployer {
-            configuration = configurations.snapshot
-            repository(url: "http://localhost:8081/nexus/content/repositories/releases")
-            snapshotRepository(url: "http://localhost:8081/nexus/content/repositories/snapshots")
-            pom.version = fullVersion
-            pom.artifactId = artifactId
+    ivy {
+        url local_ivy
+    }
+    mavenDeployer {
+
+        repository(url: project[repo + '_repo_releases_url']) {
+            authentication(userName: project[repo + 
+                '_repo_releases_username'], 
+                password: project[repo + '_repo_releases_password'])
+            releases()
         }
+
+/*        repository(url: project[repo + '_repo_snapshots_url']) {
+            authentication(userName: project[repo + 
+                '_repo_snapshots_username'], 
+                password: project[repo + '_repo_snapshots_password'])
+            snapshots()
+        }
+i*/
     }
 }
+}
+
+msproject {
+}
+
+

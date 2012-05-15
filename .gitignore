@@ -1,4 +1,6 @@
 
+*.ipr
+*.iws
 /.cache
 /.gradle
 /build
